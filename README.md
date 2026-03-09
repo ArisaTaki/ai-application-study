@@ -53,6 +53,10 @@ pip install -r requirements.txt
 
 在项目根目录创建 .env 文件：
 
+```bash
+cp -r .env.example .env
+```
+
 # AI Application Study
 
 这是一个用于学习 **AI 应用开发** 的 Python 项目仓库。  
