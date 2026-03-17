@@ -6,9 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Any
 
-from numpy.char import str_len
-from openai import conversations
-
 # ===================
 # 1. 路径基础配置
 # ===================
@@ -24,6 +21,7 @@ OUTPUT_DIR = PROJECT_ROOT / "tests" / "outputs"
 sys.path.append(str(SRC_DIR))
 
 from app.chat.prompt_loader import load_prompt
+from app.chat.engine import Engine
 
 # ===================
 # 2. 数据结构定义
@@ -93,20 +91,63 @@ def load_test_cases(case_file: Path) -> list[dict]:
 # 5. 这里是模型调用
 # ===================
 
-def call_llm(messages: list[dict[str, str]], temperature: float | None = None) -> str:
+# Deleted call_llm function as per instructions
+
+def build_engine_for_variant(variant: PromptVariant, temperature: float | None = None) -> Engine:
     """
-    统一模型调用入口。
-    这里修改了，就可以影响所有的A/B测试。
+    为某个 prompt 版本预先构建 Engine。
+
+    这样每个 variant 只初始化一次模型链，避免在每个 case 上重复初始化。
     """
-    # 暂时占位，先让脚本能跑通
-    joined = " | ".join([f"{m['role']}: {m['content'][:40]}" for m in messages])
-    return f"[TODO: 替换成真实模型调用] {joined}"
+    return Engine(
+        system_prompt=variant.content,
+        temperature=temperature if temperature is not None else 0.7,
+    )
+
+
+def run_with_engine(engine: Engine, messages: list[dict[str, str]]) -> str:
+    """
+    使用已经初始化好的 Engine 执行一次调用。
+
+    约定：
+    - 第一条 system message 仅用于构建 Engine，因此这里不再重复传入。
+    - 最后一条 user message 作为当前用户输入。
+    - 其他消息尽量拼接到 history 中。
+    """
+    history_parts: list[str] = []
+    user_input = ""
+
+    for i, message in enumerate(messages):
+        role = message.get("role", "")
+        content = message.get("content", "")
+
+        if role == "system" and i == 0:
+            continue
+
+        if role == "user" and i == len(messages) - 1:
+            user_input = content
+            continue
+
+        if role in {"system", "user", "assistant"}:
+            history_parts.append(f"{role}: {content}")
+
+    if not user_input and messages:
+        user_input = messages[-1].get("content", "")
+
+    history = "\n".join(history_parts)
+
+    return engine.chat(
+        user_input=user_input,
+        history=history,
+        long_term_memory="",
+    )
+
 
 # ===================
 # 6. Adapter：决定不同group怎么喂模型
 # ===================
 
-def run_system_group_case(variant: PromptVariant, case_input: dict[str, Any], temperature: float | None) -> str:
+def run_system_group_case(engine: Engine, variant: PromptVariant, case_input: dict[str, Any]) -> str:
     """
     适用于system/* 场景
     - prompt 文件内容作为 system prompt
@@ -119,9 +160,9 @@ def run_system_group_case(variant: PromptVariant, case_input: dict[str, Any], te
         {"role": "user", "content": user_input},
     ]
     
-    return call_llm(messages=messages, temperature=temperature)
+    return run_with_engine(engine=engine, messages=messages)
 
-def run_summary_group_case(variant: PromptVariant, case_input: dict[str, Any], temperature: float | None) -> str:
+def run_summary_group_case(engine: Engine, variant: PromptVariant, case_input: dict[str, Any]) -> str:
     """
     适用于summary/* 场景
     当前假设 summary prompt 不做模板变量替换，
@@ -134,9 +175,9 @@ def run_summary_group_case(variant: PromptVariant, case_input: dict[str, Any], t
     messages = [
         {"role": "user", "content": prompt_text},
     ]
-    return call_llm(messages=messages, temperature=temperature)
+    return run_with_engine(engine=engine, messages=messages)
 
-def get_group_runner(group: str) -> Callable[[PromptVariant, dict[str, Any], float | None], str]:
+def get_group_runner(group: str) -> Callable[[Engine, PromptVariant, dict[str, Any]], str]:
     """
     根据group前缀，决定用哪个adapter
     """
@@ -157,6 +198,12 @@ def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict
     cases = load_test_cases(case_file)
     runner = get_group_runner(group)
 
+    # 每个 prompt variant 只初始化一次 Engine，避免按 case 重复初始化
+    engines: dict[str, Engine] = {
+        variant.name: build_engine_for_variant(variant, temperature)
+        for variant in variants
+    }
+
     results = []
     
     for case in cases:
@@ -170,7 +217,8 @@ def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict
         }
         
         for variant in variants:
-            output = runner(variant, case_input, temperature)
+            engine = engines[variant.name]
+            output = runner(engine, variant, case_input)
             result_item["outputs"][variant.name] = {
                 "prompt_path": variant.relative_path,
                 "output": output,
@@ -187,6 +235,7 @@ def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict
 def save_results_to_markdown(group: str, results: list[dict], temperature: float | None) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_group_name = group.replace("/", "__")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / f"{safe_group_name}_ab_test_{timestamp}.md"
     
     lines = []
