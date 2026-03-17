@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import sys
 from dataclasses import dataclass
@@ -232,12 +233,23 @@ def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict
 # 8. 结果输出
 # ===================
 
-def save_results_to_markdown(group: str, results: list[dict], temperature: float | None) -> Path:
+
+def _build_result_base_path(group: str) -> tuple[str, Path]:
+    """构造输出文件的基础路径（不含扩展名）。"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_group_name = group.replace("/", "__")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = OUTPUT_DIR / f"{safe_group_name}_ab_test_{timestamp}.md"
-    
+    base_name = f"{safe_group_name}_ab_test_{timestamp}"
+    base_path = OUTPUT_DIR / base_name
+    return timestamp, base_path
+
+
+
+def save_results_to_markdown(group: str, results: list[dict], temperature: float | None, output_path: Path | None = None, timestamp: str | None = None) -> Path:
+    if output_path is None or timestamp is None:
+        timestamp, base_path = _build_result_base_path(group)
+        output_path = base_path.with_suffix(".md")
+
     lines = []
     lines.append(f"# Prompt A/B Test Results - {group}")
     lines.append("")
@@ -270,6 +282,86 @@ def save_results_to_markdown(group: str, results: list[dict], temperature: float
     output_path.write_text("\n".join(lines), encoding="utf-8")
     return output_path
 
+
+
+def save_results_to_json(group: str, results: list[dict], temperature: float | None, output_path: Path | None = None, timestamp: str | None = None) -> Path:
+    if output_path is None or timestamp is None:
+        timestamp, base_path = _build_result_base_path(group)
+        output_path = base_path.with_suffix(".json")
+
+    payload = {
+        "group": group,
+        "generated_at": timestamp,
+        "temperature": temperature,
+        "results": results,
+    }
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return output_path
+
+
+
+def save_results_to_csv(group: str, results: list[dict], temperature: float | None, output_path: Path | None = None, timestamp: str | None = None) -> Path:
+    if output_path is None or timestamp is None:
+        timestamp, base_path = _build_result_base_path(group)
+        output_path = base_path.with_suffix(".csv")
+
+    with open(output_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["group", "generated_at", "temperature", "case_id", "variant_name", "prompt_path", "case_input_json", "output"])
+
+        for item in results:
+            case_id = item["case_id"]
+            case_input_json = json.dumps(item["case_input"], ensure_ascii=False)
+
+            for variant_name, payload in item["outputs"].items():
+                writer.writerow(
+                    [
+                        group,
+                        timestamp,
+                        temperature,
+                        case_id,
+                        variant_name,
+                        payload["prompt_path"],
+                        case_input_json,
+                        payload["output"],
+                    ]
+                )
+
+    return output_path
+
+
+
+def save_results(group: str, results: list[dict], temperature: float | None) -> dict[str, Path]:
+    timestamp, base_path = _build_result_base_path(group)
+
+    md_path = save_results_to_markdown(
+        group=group,
+        results=results,
+        temperature=temperature,
+        output_path=base_path.with_suffix(".md"),
+        timestamp=timestamp,
+    )
+    json_path = save_results_to_json(
+        group=group,
+        results=results,
+        temperature=temperature,
+        output_path=base_path.with_suffix(".json"),
+        timestamp=timestamp,
+    )
+    csv_path = save_results_to_csv(
+        group=group,
+        results=results,
+        temperature=temperature,
+        output_path=base_path.with_suffix(".csv"),
+        timestamp=timestamp,
+    )
+
+    return {
+        "markdown": md_path,
+        "json": json_path,
+        "csv": csv_path,
+    }
+
 # ===================
 # 9. 命令行入口
 # ===================
@@ -292,12 +384,14 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     results = run_group_ab_test(group=args.group, temperature=args.temperature)
-    output_path = save_results_to_markdown(
-        group=args.group, 
-        results=results, 
-        temperature=args.temperature
-        )
-    print(f"A/B test finished. Results saved to: {output_path}")
+    output_paths = save_results(
+        group=args.group,
+        results=results,
+        temperature=args.temperature,
+    )
+    print("A/B test finished. Results saved to:")
+    for file_type, path in output_paths.items():
+        print(f"- {file_type}: {path}")
 
 if __name__ == "__main__":
     main()
