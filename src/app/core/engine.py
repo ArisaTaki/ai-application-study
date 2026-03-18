@@ -4,7 +4,7 @@ from langchain_core.output_parsers import StrOutputParser
 from typing import Any
 
 from app.config.settings import Settings
-from app.chat.prompts import KAGUYA_SYSTEM_PROMPT
+from app.core.prompts import KAGUYA_SYSTEM_PROMPT
 
 class Engine:
     def __init__(self, system_prompt: str | None = None, temperature: float = 0.7):

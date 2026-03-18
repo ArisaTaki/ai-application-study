@@ -49,11 +49,14 @@ OUTPUT_DIR = PROJECT_ROOT / "tests" / "outputs"
 sys.path.append(str(SRC_DIR))
 
 # load_prompt：根据相对路径读取 prompt 文件内容
-from app.chat.prompt_loader import load_prompt
+from app.core.prompt_loader import load_prompt
 
 # Engine：你项目里封装好的“模型调用引擎”
 # 可以类比成一个已经封装好的 service / client 实例
-from app.chat.engine import Engine
+from app.core.engine import Engine
+
+# ABTestJudge：A/B 测试评审服务。它会复用底层 Engine，让 LLM 对多个候选输出做比较和打分。
+from app.features.evals.ab_test_judge import ABTestJudge
 
 # ===================
 # 2. 数据结构定义
@@ -282,7 +285,7 @@ def get_group_runner(group: str) -> Callable[[Engine, PromptVariant, dict[str, A
 # 7. 运行某个group的全部的A/B 测试
 # ===================
 
-def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict]:
+def run_group_ab_test(group: str, temperature: float | None = None, judge: bool = False) -> list[dict]:
     # 先找到这个 group 下的所有 prompt 版本
     variants = discover_prompt_variants(group)
     # 找到对应测试用例文件
@@ -291,6 +294,10 @@ def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict
     cases = load_test_cases(case_file)
     # 根据 group 类型，选择合适的执行适配器
     runner = get_group_runner(group)
+    # 如果开启了 judge，就初始化一个评审服务。
+    # 这里先不把业务 temperature 透传进去，因为 judge 一般希望尽量稳定，
+    # 会在 ABTestJudge 内部使用自己的默认 temperature（通常接近 0）。
+    judge_service = ABTestJudge() if judge else None
 
     # 每个 prompt variant 只初始化一次 Engine，避免按 case 重复初始化
     engines: dict[str, Engine] = {
@@ -324,6 +331,14 @@ def run_group_ab_test(group: str, temperature: float | None = None) -> list[dict
                 "prompt_path": variant.relative_path,
                 "output": output,
             }
+
+        if judge_service is not None:
+            result_item["evaluation"] = judge_service.evaluate(
+                group=group,
+                case_id=case_id,
+                case_input=case_input,
+                outputs=result_item["outputs"],
+            )
         
         # 当前 case 的所有版本都跑完后，加入总结果
         results.append(result_item)
@@ -390,6 +405,15 @@ def save_results_to_markdown(group: str, results: list[dict], temperature: float
             lines.append(payload["output"])
             lines.append("")
 
+        # 如果这个 case 开启了自动评审，就把评审结果也写进 Markdown
+        if "evaluation" in item:
+            lines.append("### 自动评估")
+            lines.append("")
+            lines.append("```json")
+            lines.append(json.dumps(item["evaluation"], ensure_ascii=False, indent=2))
+            lines.append("```")
+            lines.append("")
+
         lines.append("---")
         lines.append("")
 
@@ -429,12 +453,29 @@ def save_results_to_csv(group: str, results: list[dict], temperature: float | No
     with open(output_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         # 先写表头（header）
-        writer.writerow(["group", "generated_at", "temperature", "case_id", "variant_name", "prompt_path", "case_input_json", "output"])
+        writer.writerow([
+            "group",
+            "generated_at",
+            "temperature",
+            "case_id",
+            "variant_name",
+            "prompt_path",
+            "case_input_json",
+            "output",
+            "judge_winner",
+            "judge_reason",
+        ])
 
         # 再逐条写入数据行
         for item in results:
             case_id = item["case_id"]
             case_input_json = json.dumps(item["case_input"], ensure_ascii=False)
+
+            # evaluation 是 case 级别结果，所以同一个 case 下的多行 CSV 会重复带上 winner / reason
+            # 这是正常的，因为 CSV 本来就是扁平结构
+            evaluation = item.get("evaluation", {})
+            judge_winner = evaluation.get("winner")
+            judge_reason = evaluation.get("reason")
 
             for variant_name, payload in item["outputs"].items():
                 writer.writerow(
@@ -447,6 +488,8 @@ def save_results_to_csv(group: str, results: list[dict], temperature: float | No
                         payload["prompt_path"],
                         case_input_json,
                         payload["output"],
+                        judge_winner,
+                        judge_reason,
                     ]
                 )
 
@@ -509,6 +552,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Temperature for LLM generation (default: None)",
     )
+    # --judge：可选开关
+    # 加了这个参数，就会在 A/B 输出完成之后，再调用 judge 专用 LLM 做自动评审
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Use judge LLM to score outputs (default: False)",
+    )
     return parser.parse_args()
 
 # main() 是主流程入口
@@ -516,7 +566,11 @@ def main():
     # 第一步：解析命令行参数
     args = parse_args()
     # 第二步：执行 A/B 测试主流程
-    results = run_group_ab_test(group=args.group, temperature=args.temperature)
+    results = run_group_ab_test(
+        group=args.group,
+        temperature=args.temperature,
+        judge=args.judge,
+    )
     # 第三步：把结果保存成多种格式
     output_paths = save_results(
         group=args.group,

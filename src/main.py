@@ -1,4 +1,4 @@
-from app.chat.engine import Engine
+from app.core.engine import Engine
 
 def main():
     engine = Engine()

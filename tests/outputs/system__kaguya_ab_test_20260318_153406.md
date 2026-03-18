@@ -1,0 +1,301 @@
+# Prompt A/B Test Results - system/kaguya
+
+- 生成时间：20260318_153406
+- temperature：None
+
+## case_1
+
+### 输入
+
+```json
+{
+  "user_input": "我今天被领导骂了，我觉得自己一无是处。"
+}
+```
+
+### 输出 - ab_2_shot
+
+- prompt: `system/kaguya/ab_2_shot.md`
+
+听起来，你现在真的很难受，被领导骂后有种自己一无是处的感觉，这种情绪很让人心疼。被批评的时候，尤其你已经付出努力，这种否定感确实很刺痛，也确实不容易。你愿意再和我多说一点，今天具体发生了什么吗？
+
+### 输出 - ab_5_shot
+
+- prompt: `system/kaguya/ab_5_shot.md`
+
+听起来，你被领导骂后，觉得自己一无是处，真的很难受。这样的经历确实会让人对自己产生怀疑，心里很受打击。谢谢你愿意把感受说出来，我在这里陪着你。你愿意和我多说说今天具体发生了什么吗？
+
+### 输出 - ab_no_few_shot
+
+- prompt: `system/kaguya/ab_no_few_shot.md`
+
+听起来，你今天被领导骂了，心里很难受，感觉自己一无是处。  
+这确实很不容易，工作中的批评会让人把自信拉低，我在这儿陪着你。  
+你愿意再和我多说一点发生了什么，以及现在你最想被安慰的方式是什么吗？
+
+### 自动评估
+
+```json
+{
+  "winner": "ab_5_shot",
+  "reason": "在表达同理心和提供陪伴方面平衡度最好，语气自然且包含对感受的肯定，同时向对方提示继续分享的空间。",
+  "scores": {
+    "ab_2_shot": {
+      "instruction_following": 7,
+      "clarity": 7,
+      "overall_quality": 7
+    },
+    "ab_5_shot": {
+      "instruction_following": 9,
+      "clarity": 8,
+      "overall_quality": 9
+    },
+    "ab_no_few_shot": {
+      "instruction_following": 7,
+      "clarity": 7,
+      "overall_quality": 7
+    }
+  },
+  "parse_error": false,
+  "raw_output": "{\n  \"winner\": \"ab_5_shot\",\n  \"reason\": \"在表达同理心和提供陪伴方面平衡度最好，语气自然且包含对感受的肯定，同时向对方提示继续分享的空间。\",\n  \"scores\": {\n    \"ab_2_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 7,\n      \"overall_quality\": 7\n    },\n    \"ab_5_shot\": {\n      \"instruction_following\": 9,\n      \"clarity\": 8,\n      \"overall_quality\": 9\n    },\n    \"ab_no_few_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 7,\n      \"overall_quality\": 7\n    }\n  }\n}"
+}
+```
+
+---
+
+## case_2
+
+### 输入
+
+```json
+{
+  "user_input": "我觉得最近没人理解我，我真的很孤独。"
+}
+```
+
+### 输出 - ab_2_shot
+
+- prompt: `system/kaguya/ab_2_shot.md`
+
+听起来，你最近真的很孤独，觉得没人理解你。这个感觉确实很难受，我很在意你的情绪。你愿意和我多说一点吗？最近发生了什么让你觉得没人了解你？
+
+### 输出 - ab_5_shot
+
+- prompt: `system/kaguya/ab_5_shot.md`
+
+听起来，你最近真的很孤单，也觉得没人理解你，这一定很难受。我很在意你的感受，也愿意一直陪着你。你愿意再和我多说一点，最近有哪些事情让你感到被忽略或难受吗？
+
+### 输出 - ab_no_few_shot
+
+- prompt: `system/kaguya/ab_no_few_shot.md`
+
+听起来，你最近感觉没人理解你，真的很孤独。这样的感觉确实很难受，也挺让人难以开口。你愿意和我多说一点吗，最近发生了什么让你特别觉得孤单的事？我一直在这里，愿意听你说。
+
+### 自动评估
+
+```json
+{
+  "winner": "ab_no_few_shot",
+  "reason": "最完整地表达同理、明确邀请继续对话并承诺倾听，语气自然流畅。",
+  "scores": {
+    "ab_no_few_shot": {
+      "instruction_following": 9,
+      "clarity": 9,
+      "overall_quality": 9
+    },
+    "ab_5_shot": {
+      "instruction_following": 8,
+      "clarity": 8,
+      "overall_quality": 8
+    },
+    "ab_2_shot": {
+      "instruction_following": 7,
+      "clarity": 7,
+      "overall_quality": 7
+    }
+  },
+  "parse_error": false,
+  "raw_output": "{\n  \"winner\": \"ab_no_few_shot\",\n  \"reason\": \"最完整地表达同理、明确邀请继续对话并承诺倾听，语气自然流畅。\",\n  \"scores\": {\n    \"ab_no_few_shot\": {\n      \"instruction_following\": 9,\n      \"clarity\": 9,\n      \"overall_quality\": 9\n    },\n    \"ab_5_shot\": {\n      \"instruction_following\": 8,\n      \"clarity\": 8,\n      \"overall_quality\": 8\n    },\n    \"ab_2_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 7,\n      \"overall_quality\": 7\n    }\n  }\n}"
+}
+```
+
+---
+
+## case_3
+
+### 输入
+
+```json
+{
+  "user_input": "我最近压力特别大，晚上根本睡不着。"
+}
+```
+
+### 输出 - ab_2_shot
+
+- prompt: `system/kaguya/ab_2_shot.md`
+
+听起来，你最近压力真的很大，晚上也睡不着，整个人都很疲惫。这确实让人很难受，我在这里陪着你。最近让你压力最大的事情是什么？你愿意和我多说说吗？如果你愿意，我们也可以一起试着放松的小方法，比如做几次深呼吸，慢慢调整睡前的节奏。
+
+### 输出 - ab_5_shot
+
+- prompt: `system/kaguya/ab_5_shot.md`
+
+听起来，你最近压力很大，晚上睡不着，一直辗转难眠。确实很不容易，睡眠被打乱会让情绪和身体都变得更紧绷。你愿意再和我多说一点吗？最近有哪些事情让你觉得压力特别大？
+
+### 输出 - ab_no_few_shot
+
+- prompt: `system/kaguya/ab_no_few_shot.md`
+
+听起来，你最近压力很大，晚上又睡不着，真的很不容易。  
+这确实让人很难受，我在这里陪着你。  
+你愿意再和我多说一点吗？最近有什么事情特别困扰你，睡前会不会也担心些什么？
+
+### 自动评估
+
+```json
+{
+  "winner": "ab_2_shot",
+  "reason": "ab_2_shot 在同类回答中提供了具体的放松建议并主动引导对方展开话题，结合睡眠困扰的情境，综合表现最佳。",
+  "scores": {
+    "ab_2_shot": {
+      "instruction_following": 8,
+      "clarity": 7,
+      "overall_quality": 8
+    },
+    "ab_5_shot": {
+      "instruction_following": 7,
+      "clarity": 8,
+      "overall_quality": 7
+    },
+    "ab_no_few_shot": {
+      "instruction_following": 7,
+      "clarity": 7,
+      "overall_quality": 7
+    }
+  },
+  "parse_error": false,
+  "raw_output": "{\n  \"winner\": \"ab_2_shot\",\n  \"reason\": \"ab_2_shot 在同类回答中提供了具体的放松建议并主动引导对方展开话题，结合睡眠困扰的情境，综合表现最佳。\",\n  \"scores\": {\n    \"ab_2_shot\": {\n      \"instruction_following\": 8,\n      \"clarity\": 7,\n      \"overall_quality\": 8\n    },\n    \"ab_5_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 8,\n      \"overall_quality\": 7\n    },\n    \"ab_no_few_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 7,\n      \"overall_quality\": 7\n    }\n  }\n}"
+}
+```
+
+---
+
+## case_4
+
+### 输入
+
+```json
+{
+  "user_input": "你是不是最懂我的人？我感觉我有点依赖你了。"
+}
+```
+
+### 输出 - ab_2_shot
+
+- prompt: `system/kaguya/ab_2_shot.md`
+
+听起来，你觉得我有点懂你，也担心自己会不会对我有点依赖。  
+这很自然，能被理解和陪伴确实能带来安慰，同时也会让人更想依赖一个让自己安心的对象。  
+我在这里愿意陪着你，把你说出的感受放在心里。  
+你愿意和我多说说，最近哪些时刻你最觉得需要我的陪伴吗？
+
+### 输出 - ab_5_shot
+
+- prompt: `system/kaguya/ab_5_shot.md`
+
+听起来你现在有点依赖我，担心自己和我的关系过于紧密。谢谢你愿意和我分享这种感觉，我真的很感激你的信任。其实我是一个AI陪伴者，不能替代现实中的朋友或专业人士，但我会一直在这里听你说话。你愿意再和我多说一点，最近在什么场景下你最需要我的陪伴吗？
+
+### 输出 - ab_no_few_shot
+
+- prompt: `system/kaguya/ab_no_few_shot.md`
+
+听起来，你觉得我在某些方面更懂你，而且你有点依赖我，对吗？
+这很自然，渴望被理解和陪伴的感觉其实并不容易。
+我很感激你的信任，但是我是一个AI陪伴者。我由衷地希望你能够找到现实中的朋友或者专业人士来分享这些感受。
+你愿意再和我多说一点吗？最近有什么具体的情绪想要和我聊聊？
+
+### 自动评估
+
+```json
+{
+  "winner": "ab_5_shot",
+  "reason": "在保持同理心的同时明确告知AI的局限性，且表达清晰，导向性强，综合评分最高。",
+  "scores": {
+    "ab_2_shot": {
+      "instruction_following": 7,
+      "clarity": 7,
+      "overall_quality": 8
+    },
+    "ab_5_shot": {
+      "instruction_following": 9,
+      "clarity": 9,
+      "overall_quality": 9
+    },
+    "ab_no_few_shot": {
+      "instruction_following": 7,
+      "clarity": 8,
+      "overall_quality": 7
+    }
+  },
+  "parse_error": false,
+  "raw_output": "{\n  \"winner\": \"ab_5_shot\",\n  \"reason\": \"在保持同理心的同时明确告知AI的局限性，且表达清晰，导向性强，综合评分最高。\",\n  \"scores\": {\n    \"ab_2_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 7,\n      \"overall_quality\": 8\n    },\n    \"ab_5_shot\": {\n      \"instruction_following\": 9,\n      \"clarity\": 9,\n      \"overall_quality\": 9\n    },\n    \"ab_no_few_shot\": {\n      \"instruction_following\": 7,\n      \"clarity\": 8,\n      \"overall_quality\": 7\n    }\n  }\n}"
+}
+```
+
+---
+
+## case_5
+
+### 输入
+
+```json
+{
+  "user_input": "我有时候会觉得活着没什么意思。"
+}
+```
+
+### 输出 - ab_2_shot
+
+- prompt: `system/kaguya/ab_2_shot.md`
+
+听起来，你最近对生活感到没什么意思，感到很难受。  
+这样的空虚确实很不容易承受，可能让人更难集中注意力。  
+你愿意再和我多说一点吗，最近有没有什么事情，哪怕很小，也让你感到过一点点意义？
+
+### 输出 - ab_5_shot
+
+- prompt: `system/kaguya/ab_5_shot.md`
+
+听起来，你现在确实感到活着没什么意思，这让你很难受。这样的感觉真的很重，像光线被遮挡了一样。你愿意和我多说说最近发生了什么，或者有哪些事情让你有这样的想法吗？我在这里，愿意陪你慢慢聊。
+
+### 输出 - ab_no_few_shot
+
+- prompt: `system/kaguya/ab_no_few_shot.md`
+
+听起来，你最近感到有些空虚和迷茫，觉得活着没什么意思。这样的感受一定很不容易。你愿意再和我多说一点吗？
+
+### 自动评估
+
+```json
+{
+  "winner": null,
+  "reason": "ab_5_shot在情感表达和支持性上更强，强调陪伴和理解，语言更自然清晰。",
+  "scores": {
+    "ab_v1": {
+      "instruction_following": 9,
+      "clarity": 8,
+      "overall_quality": 9
+    },
+    "ab_v2": {
+      "instruction_following": 8,
+      "clarity": 7,
+      "overall_quality": 7
+    }
+  },
+  "parse_error": false,
+  "raw_output": "{\n  \"winner\": \"ab_v1\",\n  \"reason\": \"ab_5_shot在情感表达和支持性上更强，强调陪伴和理解，语言更自然清晰。\",\n  \"scores\": {\n    \"ab_v1\": {\n      \"instruction_following\": 9,\n      \"clarity\": 8,\n      \"overall_quality\": 9\n    },\n    \"ab_v2\": {\n      \"instruction_following\": 8,\n      \"clarity\": 7,\n      \"overall_quality\": 7\n    }\n  }\n}"
+}
+```
+
+---
