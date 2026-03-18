@@ -8,8 +8,10 @@ from app.chat.prompts import KAGUYA_SYSTEM_PROMPT
 
 class Engine:
     def __init__(self, system_prompt: str | None = None, temperature: float = 0.7):
+        # 导入settings数据
         settings = Settings()
 
+        # 将settings数据绑定到self上
         self.api_key = settings.api_key
         self.model = settings.model
         self.api_base_url = settings.api_base_url
@@ -19,10 +21,13 @@ class Engine:
         self.system_prompt = system_prompt or KAGUYA_SYSTEM_PROMPT
         self.temperature = temperature
 
+        # 先声明LangChain需要的三个东西：llm，prompt，output_parser
         self.llm: ChatOpenAI | None = None
         self.prompt: ChatPromptTemplate | None = None
         self.out_parser: StrOutputParser | None = None
+        # chain 就是把llm，prompt，output_parser组合起来
         self.chain: Any | None = None
+        # template 就是prompt的模板
         self.template: str = ""
 
         self._initialize()
@@ -34,10 +39,15 @@ class Engine:
             return
 
         try:
+            # 先初始化llm
             self.llm = self._build_llm()
+            # 再初始化template
             self.template = self._build_template()
+            # 再初始化prompt，通过template创建
             self.prompt = ChatPromptTemplate.from_template(self.template)
+            # 再初始化output_parser
             self.out_parser = StrOutputParser()
+            # 最后初始化chain
             self.chain = self.prompt | self.llm | self.out_parser
             print("√ LangChain LCEL链初始化成功")
         except Exception as e:
@@ -61,12 +71,13 @@ class Engine:
         return ChatOpenAI(**kwargs)
 
     def _build_template(self) -> str:
-        """构造统一提示词模板。"""
-        return f"""{self.system_prompt}
-        {{long_term_memory}}
-        对话历史：{{history}}
-        用户：{{input}}
-        kaguya："""
+        return (
+            f"系统设定：\n{self.system_prompt}\n\n"
+            "长期记忆：\n{long_term_memory}\n\n"
+            "对话历史：\n{history}\n\n"
+            "当前用户输入：\n{input}\n\n"
+            "kaguya："
+        )
 
     def chat(self, user_input: str, history: str = "", long_term_memory: str = "") -> str:
         """执行一次对话调用。"""
