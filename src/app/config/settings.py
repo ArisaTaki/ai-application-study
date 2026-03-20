@@ -1,11 +1,10 @@
-import os
 from dotenv import load_dotenv
+
+from app.config.schemas import AppSettings
 
 load_dotenv()
 
-class Settings:
-    def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("OPENAI_MODEL", "gpt-5-nano-2025-08-07")
-        self.api_base_url = os.getenv("OPENAI_BASE_URL")
-        self.langchain_available = (os.getenv("LANGCHAIN_AVAILABLE", "true").lower() == "true")
+
+def load_settings() -> AppSettings:
+    """读取并返回项目统一配置。"""
+    return AppSettings.from_env()

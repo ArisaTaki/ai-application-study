@@ -1,15 +1,17 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from typing import Any
+from langchain_core.runnables import RunnableSerializable
 
-from app.config.settings import Settings
+from app.config.settings import load_settings
 from app.core.prompts import KAGUYA_SYSTEM_PROMPT
+from app.core.schemas import EngineChatRequest, EngineChatResult
+
 
 class Engine:
     def __init__(self, system_prompt: str | None = None, temperature: float = 0.7):
         # 导入settings数据
-        settings = Settings()
+        settings = load_settings()
 
         # 将settings数据绑定到self上
         self.api_key = settings.api_key
@@ -26,7 +28,7 @@ class Engine:
         self.prompt: ChatPromptTemplate | None = None
         self.out_parser: StrOutputParser | None = None
         # chain 就是把llm，prompt，output_parser组合起来
-        self.chain: Any | None = None
+        self.chain: RunnableSerializable[dict[str, str], str] | None = None
         # template 就是prompt的模板
         self.template: str = ""
 
@@ -79,15 +81,26 @@ class Engine:
             "kaguya："
         )
 
-    def chat(self, user_input: str, history: str = "", long_term_memory: str = "") -> str:
-        """执行一次对话调用。"""
+    def run(self, request: EngineChatRequest) -> EngineChatResult:
+        """执行一次结构化对话调用。"""
         if not self.chain:
-            return "模型未初始化成功"
+            return EngineChatResult(text="模型未初始化成功", error="engine_not_initialized")
 
-        return self.chain.invoke(
+        output = self.chain.invoke(
             {
-                "input": user_input,
-                "history": history,
-                "long_term_memory": long_term_memory,
+                "input": request.user_input,
+                "history": request.history,
+                "long_term_memory": request.long_term_memory,
             }
         )
+        return EngineChatResult(text=output)
+
+    def chat(self, user_input: str, history: str = "", long_term_memory: str = "") -> str:
+        """兼容旧调用方式的快捷接口。"""
+        return self.run(
+            EngineChatRequest(
+                user_input=user_input,
+                history=history,
+                long_term_memory=long_term_memory,
+            )
+        ).text

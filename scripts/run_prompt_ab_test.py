@@ -13,10 +13,9 @@ import argparse  # 命令行参数解析，类似 Node.js 里读取 process.argv
 import csv  # Python 标准库，用来生成 CSV 文件
 import json  # Python 标准库，用来读写 JSON
 import sys  # 提供 Python 运行时相关能力，这里主要用来改 import 路径
-from dataclasses import dataclass  # dataclass：轻量数据类，类似 TS 里“只装数据的 class/interface”
 from datetime import datetime  # 处理日期时间，这里用来生成输出文件时间戳
 from pathlib import Path  # Path 用面向对象方式处理文件路径，比字符串拼路径更稳
-from typing import Callable, Any  # 类型标注工具：Callable 表示函数类型，Any 表示任意类型
+from typing import Callable, cast  # 类型标注工具：Callable 表示函数类型
 
 # ===================
 # 1. 路径基础配置
@@ -50,6 +49,18 @@ sys.path.append(str(SRC_DIR))
 
 # load_prompt：根据相对路径读取 prompt 文件内容
 from app.core.prompt_loader import load_prompt
+from app.core.schemas import (
+    build_prompt_metadata,
+    CaseInput,
+    ChatMessage,
+    EngineChatRequest,
+    PromptGroup,
+    PromptReference,
+    PromptVariant,
+    SummaryCaseInput,
+    SystemCaseInput,
+    validate_case_input,
+)
 
 # Engine：你项目里封装好的“模型调用引擎”
 # 可以类比成一个已经封装好的 service / client 实例
@@ -57,29 +68,18 @@ from app.core.engine import Engine
 
 # ABTestJudge：A/B 测试评审服务。它会复用底层 Engine，让 LLM 对多个候选输出做比较和打分。
 from app.features.evals.ab_test_judge import ABTestJudge
-
-# ===================
-# 2. 数据结构定义
-# ===================
-
-# dataclass 就是“数据类装饰器”。
-# 你可以把它理解成：
-# - 这个类主要是用来装数据的
-# - Python 会自动帮你生成 __init__、__repr__ 等常见方法
-# 如果类比 TypeScript，它很像：
-# - 一个只保存字段的 class
-# - 或者一个“可实例化的 interface/type”
-@dataclass
-class PromptVariant:
-    name: str  # prompt 版本名，比如 ab_v1 / ab_v2
-    relative_path: str  # 相对路径，比如 system/kaguya/ab_v1.md
-    content: str  # prompt 文件的完整文本内容
+from app.features.evals.schemas import (
+    ABTestCase,
+    ABTestCaseResult,
+    ABTestOutputPaths,
+    PromptRunOutput,
+)
 
 # ===================
 # 3. 发现 prompt group 下的 ab版本
 # ===================
 
-def discover_prompt_variants(group: str) -> list[PromptVariant]:
+def discover_prompt_variants(group: PromptGroup) -> list[PromptVariant]:
     """
     根据group（比如system/kaguya）自动发现该目录下所有ab_*.md文件
     """
@@ -104,13 +104,14 @@ def discover_prompt_variants(group: str) -> list[PromptVariant]:
         # 会变成 system/kaguya/ab_v1.md
         relative_path = str(path.relative_to(PROMPTS_ROOT))
         # 读取这个 prompt 文件的具体内容
-        content = load_prompt(relative_path)
+        content = load_prompt(PromptReference(relative_path))
         # 把这一个 prompt 版本包装成 PromptVariant 对象，塞进列表里
         variants.append(
             PromptVariant(
-                name = variant_name,
-                relative_path = relative_path,
-                content = content
+                name=variant_name,
+                relative_path=relative_path,
+                content=content,
+                metadata=build_prompt_metadata(PromptReference(relative_path)),
             )
         )
     
@@ -123,7 +124,7 @@ def discover_prompt_variants(group: str) -> list[PromptVariant]:
 # 4. 自动匹配测试样本文件
 # ===================
 
-def resolve_test_case_file(group: str) -> Path:
+def resolve_test_case_file(group: PromptGroup) -> Path:
     """
     根据 group 自动推导测试用例文件路径。
 
@@ -139,13 +140,33 @@ def resolve_test_case_file(group: str) -> Path:
 
     return case_file
 
-def load_test_cases(case_file: Path) -> list[dict]:
+def load_test_cases(case_file: Path, group: PromptGroup) -> list[ABTestCase]:
     # open(..., "r") 表示只读模式读取文件
     # encoding="utf-8" 表示按 UTF-8 编码读取，避免中文乱码
     with open(case_file, "r", encoding="utf-8") as f:
         # json.load(f) 会把 JSON 文件内容直接转成 Python 对象
         # 如果 JSON 顶层是数组，这里通常就会得到 list[dict]
-        return json.load(f)
+        raw_cases = json.load(f)
+
+    cases: list[ABTestCase] = []
+    for item in raw_cases:
+        case_id = item.get("id")
+        case_input = item.get("input")
+
+        if not isinstance(case_id, str):
+            raise ValueError(f"测试用例缺少合法的字符串 id: {item}")
+
+        if not isinstance(case_input, dict):
+            raise ValueError(f"测试用例缺少合法的 input 对象: {item}")
+
+        cases.append(
+            ABTestCase(
+                id=case_id,
+                input=validate_case_input(group, case_input),
+            )
+        )
+
+    return cases
 
 # ===================
 # 5. 这里是模型调用
@@ -171,7 +192,7 @@ def build_engine_for_variant(variant: PromptVariant, temperature: float | None =
     )
 
 
-def run_with_engine(engine: Engine, messages: list[dict[str, str]]) -> str:
+def run_with_engine(engine: Engine, messages: list[ChatMessage]) -> str:
     """
     使用已经初始化好的 Engine 执行一次调用。
 
@@ -190,8 +211,8 @@ def run_with_engine(engine: Engine, messages: list[dict[str, str]]) -> str:
     # - i：下标
     # - message：当前这条消息对象
     for i, message in enumerate(messages):
-        role = message.get("role", "")
-        content = message.get("content", "")
+        role = message.role
+        content = message.content
 
         # 第一条 system message 已经在构建 Engine 时用过了
         # 这里就不再重复塞给 history，避免重复
@@ -212,44 +233,47 @@ def run_with_engine(engine: Engine, messages: list[dict[str, str]]) -> str:
     # 兜底逻辑：如果上面没有识别出 user_input
     # 就直接拿最后一条消息的 content，避免传空
     if not user_input and messages:
-        user_input = messages[-1].get("content", "")
+        user_input = messages[-1].content
 
     # 把历史片段列表拼成一个多行字符串
     history = "\n".join(history_parts)
 
     # 真正调用 Engine.chat()
     # 这里 long_term_memory 先传空字符串，说明这版脚本暂时还没接长期记忆
-    return engine.chat(
-        user_input=user_input,
-        history=history,
-        long_term_memory="",
-    )
+    return engine.run(
+        EngineChatRequest(
+            user_input=user_input,
+            history=history,
+            long_term_memory="",
+        )
+    ).text
 
 
 # ===================
 # 6. Adapter：决定不同group怎么喂模型
 # ===================
 
-def run_system_group_case(engine: Engine, variant: PromptVariant, case_input: dict[str, Any]) -> str:
+def run_system_group_case(engine: Engine, variant: PromptVariant, case_input: CaseInput) -> str:
     """
     适用于system/* 场景
     - prompt 文件内容作为 system prompt
     - case_input 里面提取user_input
     """
     # 从测试用例里取出 user_input 字段
-    user_input = case_input["user_input"]
+    system_case_input = cast(SystemCaseInput, case_input)
+    user_input = system_case_input["user_input"]
     
     # 这里手动组装成消息列表
     # 类比前端里构造一个 messages 数组传给聊天接口
     messages = [
-        {"role": "system", "content": variant.content},
-        {"role": "user", "content": user_input},
+        ChatMessage(role="system", content=variant.content),
+        ChatMessage(role="user", content=user_input),
     ]
     
     # 交给通用执行函数处理
     return run_with_engine(engine=engine, messages=messages)
 
-def run_summary_group_case(engine: Engine, variant: PromptVariant, case_input: dict[str, Any]) -> str:
+def run_summary_group_case(engine: Engine, variant: PromptVariant, case_input: CaseInput) -> str:
     """
     适用于summary/* 场景
     当前假设 summary prompt 不做模板变量替换，
@@ -257,18 +281,19 @@ def run_summary_group_case(engine: Engine, variant: PromptVariant, case_input: d
     TODO: 后续可以支持模板变量替换 比如 {{conversation}}
     """
     # summary 类测试通常会给一整段 conversation
-    conversation = case_input["conversation"]
+    summary_case_input = cast(SummaryCaseInput, case_input)
+    conversation = summary_case_input["conversation"]
 
     # 这里是最简单的做法：
     # 直接把 prompt 模板文本 + 对话内容 拼在一起
     prompt_text = f"{variant.content}\n\n对话内容：\n{conversation}"
     # 然后把拼好的整段内容作为 user 消息发给模型
     messages = [
-        {"role": "user", "content": prompt_text},
+        ChatMessage(role="user", content=prompt_text),
     ]
     return run_with_engine(engine=engine, messages=messages)
 
-def get_group_runner(group: str) -> Callable[[Engine, PromptVariant, dict[str, Any]], str]:
+def get_group_runner(group: PromptGroup) -> Callable[[Engine, PromptVariant, CaseInput], str]:
     """
     根据group前缀，决定用哪个adapter
     """
@@ -285,13 +310,17 @@ def get_group_runner(group: str) -> Callable[[Engine, PromptVariant, dict[str, A
 # 7. 运行某个group的全部的A/B 测试
 # ===================
 
-def run_group_ab_test(group: str, temperature: float | None = None, judge: bool = False) -> list[dict]:
+def run_group_ab_test(
+    group: PromptGroup,
+    temperature: float | None = None,
+    judge: bool = False,
+) -> list[ABTestCaseResult]:
     # 先找到这个 group 下的所有 prompt 版本
     variants = discover_prompt_variants(group)
     # 找到对应测试用例文件
     case_file = resolve_test_case_file(group)
     # 把测试用例 JSON 读进来
-    cases = load_test_cases(case_file)
+    cases = load_test_cases(case_file, group)
     # 根据 group 类型，选择合适的执行适配器
     runner = get_group_runner(group)
     # 如果开启了 judge，就初始化一个评审服务。
@@ -306,19 +335,15 @@ def run_group_ab_test(group: str, temperature: float | None = None, judge: bool 
     }
 
     # 最终结果列表：每个 case 会生成一条结果
-    results = []
+    results: list[ABTestCaseResult] = []
     
     # 外层循环：遍历每一个测试用例
     for case in cases:
         # result_item：记录“这个 case 在各个 prompt 版本下的输出”
-        case_id = case["id"]
-        case_input = case["input"]
+        case_id = case.id
+        case_input = case.input
 
-        result_item = {
-            "case_id": case_id,
-            "case_input": case_input,
-            "outputs": {}
-        }
+        result_item = ABTestCaseResult(case_id=case_id, case_input=case_input)
         
         # 内层循环：让每个 prompt 版本都跑一遍当前 case
         for variant in variants:
@@ -327,17 +352,18 @@ def run_group_ab_test(group: str, temperature: float | None = None, judge: bool 
             # 真正执行一次模型调用
             output = runner(engine, variant, case_input)
             # 把该 variant 的输出结果记录下来
-            result_item["outputs"][variant.name] = {
-                "prompt_path": variant.relative_path,
-                "output": output,
-            }
+            result_item.outputs[variant.name] = PromptRunOutput(
+                prompt_path=variant.relative_path,
+                prompt_metadata=variant.metadata,
+                output=output,
+            )
 
         if judge_service is not None:
-            result_item["evaluation"] = judge_service.evaluate(
+            result_item.evaluation = judge_service.evaluate(
                 group=group,
                 case_id=case_id,
                 case_input=case_input,
-                outputs=result_item["outputs"],
+                outputs=result_item.outputs,
             )
         
         # 当前 case 的所有版本都跑完后，加入总结果
@@ -371,7 +397,13 @@ def _build_result_base_path(group: str) -> tuple[str, Path]:
 
 
 
-def save_results_to_markdown(group: str, results: list[dict], temperature: float | None, output_path: Path | None = None, timestamp: str | None = None) -> Path:
+def save_results_to_markdown(
+    group: PromptGroup,
+    results: list[ABTestCaseResult],
+    temperature: float | None,
+    output_path: Path | None = None,
+    timestamp: str | None = None,
+) -> Path:
     # 如果外部没有传 output_path / timestamp，就自己现算一份默认输出路径
     if output_path is None or timestamp is None:
         timestamp, base_path = _build_result_base_path(group)
@@ -387,30 +419,35 @@ def save_results_to_markdown(group: str, results: list[dict], temperature: float
 
     # 遍历每个 case，把输入和不同 variant 的输出写进 Markdown
     for item in results:
-        lines.append(f"## {item['case_id']}")
+        lines.append(f"## {item.case_id}")
         lines.append("")
 
         lines.append("### 输入")
         lines.append("")
         lines.append("```json")
-        lines.append(json.dumps(item["case_input"], ensure_ascii=False, indent=2))
+        lines.append(json.dumps(item.case_input, ensure_ascii=False, indent=2))
         lines.append("```")
         lines.append("")
 
-        for variant_name, payload in item["outputs"].items():
+        for variant_name, payload in item.outputs.items():
             lines.append(f"### 输出 - {variant_name}")
             lines.append("")
-            lines.append(f"- prompt: `{payload['prompt_path']}`")
+            lines.append(f"- prompt: `{payload.prompt_path}`")
+            lines.append(f"- domain: `{payload.prompt_metadata.domain}`")
+            lines.append(f"- group: `{payload.prompt_metadata.group}`")
+            lines.append(f"- family: `{payload.prompt_metadata.family}`")
+            lines.append(f"- production: `{payload.prompt_metadata.is_production}`")
+            lines.append(f"- ab_variant: `{payload.prompt_metadata.is_ab_variant}`")
             lines.append("")
-            lines.append(payload["output"])
+            lines.append(payload.output)
             lines.append("")
 
         # 如果这个 case 开启了自动评审，就把评审结果也写进 Markdown
-        if "evaluation" in item:
+        if item.evaluation is not None:
             lines.append("### 自动评估")
             lines.append("")
             lines.append("```json")
-            lines.append(json.dumps(item["evaluation"], ensure_ascii=False, indent=2))
+            lines.append(json.dumps(item.evaluation.to_dict(), ensure_ascii=False, indent=2))
             lines.append("```")
             lines.append("")
 
@@ -423,7 +460,13 @@ def save_results_to_markdown(group: str, results: list[dict], temperature: float
 
 
 
-def save_results_to_json(group: str, results: list[dict], temperature: float | None, output_path: Path | None = None, timestamp: str | None = None) -> Path:
+def save_results_to_json(
+    group: PromptGroup,
+    results: list[ABTestCaseResult],
+    temperature: float | None,
+    output_path: Path | None = None,
+    timestamp: str | None = None,
+) -> Path:
     # 如果外部没有传 output_path / timestamp，就自己现算一份默认输出路径
     if output_path is None or timestamp is None:
         timestamp, base_path = _build_result_base_path(group)
@@ -434,7 +477,7 @@ def save_results_to_json(group: str, results: list[dict], temperature: float | N
         "group": group,
         "generated_at": timestamp,
         "temperature": temperature,
-        "results": results,
+        "results": [item.to_dict() for item in results],
     }
     # ensure_ascii=False：保留中文，不转成 \uXXXX
     # indent=2：缩进 2 个空格，方便阅读
@@ -443,7 +486,13 @@ def save_results_to_json(group: str, results: list[dict], temperature: float | N
 
 
 
-def save_results_to_csv(group: str, results: list[dict], temperature: float | None, output_path: Path | None = None, timestamp: str | None = None) -> Path:
+def save_results_to_csv(
+    group: PromptGroup,
+    results: list[ABTestCaseResult],
+    temperature: float | None,
+    output_path: Path | None = None,
+    timestamp: str | None = None,
+) -> Path:
     # 如果外部没有传 output_path / timestamp，就自己现算一份默认输出路径
     if output_path is None or timestamp is None:
         timestamp, base_path = _build_result_base_path(group)
@@ -468,16 +517,16 @@ def save_results_to_csv(group: str, results: list[dict], temperature: float | No
 
         # 再逐条写入数据行
         for item in results:
-            case_id = item["case_id"]
-            case_input_json = json.dumps(item["case_input"], ensure_ascii=False)
+            case_id = item.case_id
+            case_input_json = json.dumps(item.case_input, ensure_ascii=False)
 
             # evaluation 是 case 级别结果，所以同一个 case 下的多行 CSV 会重复带上 winner / reason
             # 这是正常的，因为 CSV 本来就是扁平结构
-            evaluation = item.get("evaluation", {})
-            judge_winner = evaluation.get("winner")
-            judge_reason = evaluation.get("reason")
+            evaluation = item.evaluation
+            judge_winner = evaluation.winner if evaluation is not None else None
+            judge_reason = evaluation.reason if evaluation is not None else None
 
-            for variant_name, payload in item["outputs"].items():
+            for variant_name, payload in item.outputs.items():
                 writer.writerow(
                     [
                         group,
@@ -485,9 +534,9 @@ def save_results_to_csv(group: str, results: list[dict], temperature: float | No
                         temperature,
                         case_id,
                         variant_name,
-                        payload["prompt_path"],
+                        payload.prompt_path,
                         case_input_json,
-                        payload["output"],
+                        payload.output,
                         judge_winner,
                         judge_reason,
                     ]
@@ -497,7 +546,11 @@ def save_results_to_csv(group: str, results: list[dict], temperature: float | No
 
 
 
-def save_results(group: str, results: list[dict], temperature: float | None) -> dict[str, Path]:
+def save_results(
+    group: PromptGroup,
+    results: list[ABTestCaseResult],
+    temperature: float | None,
+) -> ABTestOutputPaths:
     # 先生成这一批结果共用的时间戳和基础文件名
     timestamp, base_path = _build_result_base_path(group)
 
@@ -524,11 +577,11 @@ def save_results(group: str, results: list[dict], temperature: float | None) -> 
     )
 
     # 返回三种输出文件路径，方便 main() 统一打印
-    return {
-        "markdown": md_path,
-        "json": json_path,
-        "csv": csv_path,
-    }
+    return ABTestOutputPaths(
+        markdown=md_path,
+        json=json_path,
+        csv=csv_path,
+    )
 
 # ===================
 # 9. 命令行入口
@@ -579,7 +632,7 @@ def main():
     )
     # 第四步：把输出文件路径打印到终端
     print("A/B test finished. Results saved to:")
-    for file_type, path in output_paths.items():
+    for file_type, path in output_paths.to_dict().items():
         print(f"- {file_type}: {path}")
 
 # Python 里的标准脚本入口判断

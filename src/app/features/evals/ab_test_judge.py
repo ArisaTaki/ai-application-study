@@ -1,8 +1,15 @@
 import json
-from typing import Any
 
 from app.core.engine import Engine
 from app.core.prompt_loader import load_prompt
+from app.core.schemas import (
+    CaseInput,
+    EngineChatRequest,
+    PromptGroup,
+    PromptReference,
+    VariantName,
+)
+from app.features.evals.schemas import JudgeEvaluation, JudgeScore, PromptRunOutput
 
 
 class ABTestJudge:
@@ -22,7 +29,7 @@ class ABTestJudge:
     
     def __init__(self, judge_prompt_path: str | None = None, temperature: float | None = None) -> None:
         self.judge_prompt_path = judge_prompt_path or self.JUDGE_PROMPT_PATH
-        judge_prompt_text = load_prompt(self.judge_prompt_path)
+        judge_prompt_text = load_prompt(PromptReference(self.judge_prompt_path))
         self.engine = Engine(
             system_prompt=judge_prompt_text,
             temperature=temperature if temperature is not None else 0.0,
@@ -30,11 +37,11 @@ class ABTestJudge:
 
     def evaluate(
         self,
-        group: str,
+        group: PromptGroup,
         case_id: str,
-        case_input: dict[str, Any],
-        outputs: dict[str, dict[str, Any]],
-    ) -> dict[str, Any]:
+        case_input: CaseInput,
+        outputs: dict[VariantName, PromptRunOutput],
+    ) -> JudgeEvaluation:
         """
         单个case的多个 A/B输出做评审。
 
@@ -76,11 +83,13 @@ class ABTestJudge:
         )
         
         # 2. 调用底层Engine，这里不需要History和长期记忆，所以全部传空
-        raw_output = self.engine.chat(
-            user_input=judge_input,
-            history="",
-            long_term_memory=""
-        )
+        raw_output = self.engine.run(
+            EngineChatRequest(
+                user_input=judge_input,
+                history="",
+                long_term_memory="",
+            )
+        ).text
 
         # 3. 解析judge 模型返回内容
         parsed_result = self._parser_judge_output(
@@ -89,15 +98,15 @@ class ABTestJudge:
         )
 
         # 4. 无论解析还是失败，把原始输出带上，方便调试。
-        parsed_result["raw_output"] = raw_output
+        parsed_result.raw_output = raw_output
         return parsed_result
 
     def _build_judge_input(
         self,
-        group: str,
+        group: PromptGroup,
         case_id: str,
-        case_input: dict[str, Any],
-        outputs: dict[str, dict[str, Any]],
+        case_input: CaseInput,
+        outputs: dict[VariantName, PromptRunOutput],
     ) -> str:
         """
         构造judge 模型需要的user_input。
@@ -124,9 +133,9 @@ class ABTestJudge:
         # 逐个variant 把输入塞进去
         for variant_name, payload in outputs.items():
             lines.append(f"### {variant_name}")
-            lines.append(f"prompt_path: {payload.get('prompt_path', '')}")
+            lines.append(f"prompt_path: {payload.prompt_path}")
             lines.append("output:")
-            lines.append(payload.get("output", ""))
+            lines.append(payload.output)
             lines.append("")
         lines.append("请严格按照 system prompt里面要求的json格式返回。")
 
@@ -135,8 +144,8 @@ class ABTestJudge:
     def _parser_judge_output(
         self,
         raw_output: str,
-        variant_names: list[str],
-    ) -> dict[str, Any]:
+        variant_names: list[VariantName],
+    ) -> JudgeEvaluation:
         """
         解析 judge的模型输出。
 
@@ -166,18 +175,18 @@ class ABTestJudge:
                 pass
         
         #3. 彻底失败的时候给一个兜底结构
-        return {
-            "winner": None,
-            "reason": "无法解析judge输出",
-            "score": {},
-            "parse_error": True
-        }
+        return JudgeEvaluation(
+            winner=None,
+            reason="无法解析judge输出",
+            scores={},
+            parse_error=True,
+        )
 
     def _normalize_result(
         self,
-        parsed: dict[str, Any],
-        variant_names: list[str],
-    ) -> dict[str, Any]:
+        parsed: dict[str, object],
+        variant_names: list[VariantName],
+    ) -> JudgeEvaluation:
         """
         对解析出来的结果做标准化
 
@@ -191,19 +200,55 @@ class ABTestJudge:
         scores = parsed.get("scores", {})
 
         # winner不合法？就置空
-        if winner not in variant_names:
+        if not isinstance(winner, str) or winner not in variant_names:
             winner = None
+
+        if not isinstance(reason, str):
+            reason = ""
         
         # scores不是字典，也就兜底成空
         if not isinstance(scores, dict):
-            scores = {}
+            normalized_scores: dict[VariantName, JudgeScore] = {}
+        else:
+            normalized_scores = self._normalize_scores(scores, variant_names)
         
-        return {
-            "winner": winner,
-            "reason": reason,
-            "scores": scores,
-            "parse_error": False
-        }
+        return JudgeEvaluation(
+            winner=winner,
+            reason=reason,
+            scores=normalized_scores,
+            parse_error=False,
+        )
+
+    def _normalize_scores(
+        self,
+        raw_scores: dict[object, object],
+        variant_names: list[VariantName],
+    ) -> dict[VariantName, JudgeScore]:
+        """把 judge 输出的 scores 字段标准化为结构化评分对象。"""
+        normalized_scores: dict[VariantName, JudgeScore] = {}
+
+        for raw_variant_name, raw_score_payload in raw_scores.items():
+            if not isinstance(raw_variant_name, str) or raw_variant_name not in variant_names:
+                continue
+
+            if not isinstance(raw_score_payload, dict):
+                continue
+
+            normalized_scores[raw_variant_name] = JudgeScore(
+                instruction_following=self._parse_optional_int(
+                    raw_score_payload.get("instruction_following")
+                ),
+                clarity=self._parse_optional_int(raw_score_payload.get("clarity")),
+                overall_quality=self._parse_optional_int(
+                    raw_score_payload.get("overall_quality")
+                ),
+            )
+
+        return normalized_scores
+
+    def _parse_optional_int(self, value: object) -> int | None:
+        """把 judge 返回的评分项解析成整数；无效值返回 None。"""
+        return value if isinstance(value, int) else None
     
     def _extract_json_object(self, text: str) -> str | None:
         """
