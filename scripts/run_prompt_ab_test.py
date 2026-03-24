@@ -51,13 +51,13 @@ sys.path.append(str(SRC_DIR))
 from app.core.prompt_loader import load_prompt
 from app.core.schemas import (
     build_prompt_metadata,
-    CaseInput,
     ChatMessage,
     EngineChatRequest,
     PromptGroup,
     PromptReference,
     PromptVariant,
     SummaryCaseInput,
+    SupportedCaseInput,
     SystemCaseInput,
     validate_case_input,
 )
@@ -67,7 +67,7 @@ from app.core.schemas import (
 from app.core.engine import Engine
 
 # ABTestJudge：A/B 测试评审服务。它会复用底层 Engine，让 LLM 对多个候选输出做比较和打分。
-from app.features.evals.ab_test_judge import ABTestJudge
+from app.features.evals.service import ABTestJudgeService
 from app.features.evals.schemas import (
     ABTestCase,
     ABTestCaseResult,
@@ -253,7 +253,11 @@ def run_with_engine(engine: Engine, messages: list[ChatMessage]) -> str:
 # 6. Adapter：决定不同group怎么喂模型
 # ===================
 
-def run_system_group_case(engine: Engine, variant: PromptVariant, case_input: CaseInput) -> str:
+def run_system_group_case(
+    engine: Engine,
+    variant: PromptVariant,
+    case_input: SupportedCaseInput,
+) -> str:
     """
     适用于system/* 场景
     - prompt 文件内容作为 system prompt
@@ -273,7 +277,11 @@ def run_system_group_case(engine: Engine, variant: PromptVariant, case_input: Ca
     # 交给通用执行函数处理
     return run_with_engine(engine=engine, messages=messages)
 
-def run_summary_group_case(engine: Engine, variant: PromptVariant, case_input: CaseInput) -> str:
+def run_summary_group_case(
+    engine: Engine,
+    variant: PromptVariant,
+    case_input: SupportedCaseInput,
+) -> str:
     """
     适用于summary/* 场景
     当前假设 summary prompt 不做模板变量替换，
@@ -293,7 +301,7 @@ def run_summary_group_case(engine: Engine, variant: PromptVariant, case_input: C
     ]
     return run_with_engine(engine=engine, messages=messages)
 
-def get_group_runner(group: PromptGroup) -> Callable[[Engine, PromptVariant, CaseInput], str]:
+def get_group_runner(group: PromptGroup) -> Callable[[Engine, PromptVariant, SupportedCaseInput], str]:
     """
     根据group前缀，决定用哪个adapter
     """
@@ -325,8 +333,8 @@ def run_group_ab_test(
     runner = get_group_runner(group)
     # 如果开启了 judge，就初始化一个评审服务。
     # 这里先不把业务 temperature 透传进去，因为 judge 一般希望尽量稳定，
-    # 会在 ABTestJudge 内部使用自己的默认 temperature（通常接近 0）。
-    judge_service = ABTestJudge() if judge else None
+    # 会在 ABTestJudgeService 内部使用自己的默认 temperature（通常接近 0）。
+    judge_service = ABTestJudgeService() if judge else None
 
     # 每个 prompt variant 只初始化一次 Engine，避免按 case 重复初始化
     engines: dict[str, Engine] = {

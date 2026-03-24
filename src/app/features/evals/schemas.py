@@ -1,7 +1,13 @@
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from app.core.schemas import CaseId, CaseInput, PromptMetadata, PromptPath, VariantName
+from app.core.schemas import (
+    CaseId,
+    PromptMetadata,
+    PromptPath,
+    SupportedCaseInput,
+    VariantName,
+)
 
 
 @dataclass(slots=True)
@@ -83,7 +89,7 @@ class ABTestCase:
     id: CaseId
     # 用例 ID。
 
-    input: CaseInput
+    input: SupportedCaseInput
     # 这条用例的输入内容。
 
 
@@ -94,7 +100,7 @@ class ABTestCaseResult:
     case_id: CaseId
     # 当前结果对应的用例 ID。
 
-    case_input: CaseInput
+    case_input: SupportedCaseInput
     # 当前用例输入，保留原样便于落盘与排查。
 
     outputs: dict[VariantName, PromptRunOutput] = field(default_factory=dict)

@@ -3,16 +3,16 @@ import json
 from app.core.engine import Engine
 from app.core.prompt_loader import load_prompt
 from app.core.schemas import (
-    CaseInput,
     EngineChatRequest,
     PromptGroup,
     PromptReference,
+    SupportedCaseInput,
     VariantName,
 )
 from app.features.evals.schemas import JudgeEvaluation, JudgeScore, PromptRunOutput
 
 
-class ABTestJudge:
+class ABTestJudgeService:
     """
     AB测试评审器
 
@@ -39,7 +39,7 @@ class ABTestJudge:
         self,
         group: PromptGroup,
         case_id: str,
-        case_input: CaseInput,
+        case_input: SupportedCaseInput,
         outputs: dict[VariantName, PromptRunOutput],
     ) -> JudgeEvaluation:
         """
@@ -105,7 +105,7 @@ class ABTestJudge:
         self,
         group: PromptGroup,
         case_id: str,
-        case_input: CaseInput,
+        case_input: SupportedCaseInput,
         outputs: dict[VariantName, PromptRunOutput],
     ) -> str:
         """
