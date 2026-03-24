@@ -116,6 +116,15 @@ class PromptMetadata:
     variant_name: str | None = None
     # 变体名；如果是 A/B 测试文件则为具体变体名，否则为 None。
 
+def normalize_prompt_path(val: str) -> PromptDomain:
+    if val == "system":
+        return "system"
+    elif val == "summary":
+        return "summary"
+    elif val == "judge":
+        return "judge"
+    else:
+        return "unknown"
 
 def build_prompt_metadata(prompt: PromptReference) -> PromptMetadata:
     """根据 prompt 相对路径推断元数据。"""
@@ -125,7 +134,7 @@ def build_prompt_metadata(prompt: PromptReference) -> PromptMetadata:
     domain = parts[0] if parts else "unknown"
     normalized_domain: PromptDomain
     if domain in {"system", "summary", "judge"}:
-        normalized_domain = domain
+        normalized_domain = normalize_prompt_path(domain)
     else:
         normalized_domain = "unknown"
 

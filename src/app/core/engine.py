@@ -62,15 +62,14 @@ class Engine:
 
     def _build_llm(self) -> ChatOpenAI:
         """构造底层 LLM 实例。"""
-        kwargs = {
-            "model": self.model,
-            "temperature": self.temperature,
-            "api_key": self.api_key,
-        }
         if self.api_base_url:
-            kwargs["base_url"] = self.api_base_url
-
-        return ChatOpenAI(**kwargs)
+            return ChatOpenAI(
+                model=self.model,
+                temperature=self.temperature,
+                base_url=self.api_base_url,
+            )
+        return ChatOpenAI(model=self.model, temperature=self.temperature)
+        
 
     def _build_template(self) -> str:
         return (
