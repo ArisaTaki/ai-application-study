@@ -1,6 +1,6 @@
 import json
 
-from app.core.engine import Engine
+from app.core.contracts.chat_model import ChatModel
 from app.core.prompt_loader import load_prompt
 from app.core.schemas import (
     EngineChatRequest,
@@ -10,6 +10,7 @@ from app.core.schemas import (
     VariantName,
 )
 from app.features.evals.schemas import JudgeEvaluation, JudgeScore, PromptRunOutput
+from app.infra.factories.llm_factory import build_chat_model
 
 
 class ABTestJudgeService:
@@ -20,7 +21,7 @@ class ABTestJudgeService:
     而是：
     1. 加载judge用的prompt
     2. 构建评审内容输入
-    3. 调用core层的Engine
+    3. 调用聊天模型
     4. 解析模型输出
     5. 转换为json评审结果
     """
@@ -30,7 +31,7 @@ class ABTestJudgeService:
     def __init__(self, judge_prompt_path: str | None = None, temperature: float | None = None) -> None:
         self.judge_prompt_path = judge_prompt_path or self.JUDGE_PROMPT_PATH
         judge_prompt_text = load_prompt(PromptReference(self.judge_prompt_path))
-        self.engine = Engine(
+        self.chat_model: ChatModel = build_chat_model(
             system_prompt=judge_prompt_text,
             temperature=temperature if temperature is not None else 0.0,
         )
@@ -82,8 +83,8 @@ class ABTestJudgeService:
             outputs=outputs
         )
         
-        # 2. 调用底层Engine，这里不需要History和长期记忆，所以全部传空
-        raw_output = self.engine.run(
+        # 2. 调用底层聊天模型，这里不需要History和长期记忆，所以全部传空
+        raw_output = self.chat_model.run(
             EngineChatRequest(
                 user_input=judge_input,
                 history="",

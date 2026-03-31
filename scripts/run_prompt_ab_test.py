@@ -49,6 +49,7 @@ sys.path.append(str(SRC_DIR))
 
 # load_prompt：根据相对路径读取 prompt 文件内容
 from app.core.prompt_loader import load_prompt
+from app.core.contracts.chat_model import ChatModel
 from app.core.schemas import (
     build_prompt_metadata,
     ChatMessage,
@@ -62,9 +63,7 @@ from app.core.schemas import (
     validate_case_input,
 )
 
-# Engine：你项目里封装好的“模型调用引擎”
-# 可以类比成一个已经封装好的 service / client 实例
-from app.core.engine import Engine
+from app.infra.factories.llm_factory import build_chat_model
 
 # ABTestJudge：A/B 测试评审服务。它会复用底层 Engine，让 LLM 对多个候选输出做比较和打分。
 from app.features.evals.service import ABTestJudgeService
@@ -172,32 +171,34 @@ def load_test_cases(case_file: Path, group: PromptGroup) -> list[ABTestCase]:
 # 5. 这里是模型调用
 # ===================
 
-# 这里没有直接写 call_llm() 这种函数，而是统一通过 Engine 来调用模型。
+# 这里没有直接写 call_llm() 这种函数，而是统一通过聊天模型来调用。
 # 这样做的好处是：
 # - 模型初始化逻辑集中管理
 # - 温度、prompt、记忆等参数更容易统一封装
 # - 后续更容易替换底层实现
 
-def build_engine_for_variant(variant: PromptVariant, temperature: float | None = None) -> Engine:
+def build_chat_model_for_variant(
+    variant: PromptVariant, temperature: float | None = None
+) -> ChatModel:
     """
-    为某个 prompt 版本预先构建 Engine。
+    为某个 prompt 版本预先构建聊天模型。
 
     这样每个 variant 只初始化一次模型链，避免在每个 case 上重复初始化。
     """
-    # 这里把“某个 prompt 版本的内容”塞进 Engine 里，作为 system_prompt
+    # 这里把“某个 prompt 版本的内容”塞进聊天模型里，作为 system prompt
     # temperature 如果外部没传，就默认用 0.7
-    return Engine(
+    return build_chat_model(
         system_prompt=variant.content,
         temperature=temperature if temperature is not None else 0.7,
     )
 
 
-def run_with_engine(engine: Engine, messages: list[ChatMessage]) -> str:
+def run_with_engine(chat_model: ChatModel, messages: list[ChatMessage]) -> str:
     """
-    使用已经初始化好的 Engine 执行一次调用。
+    使用已经初始化好的聊天模型执行一次调用。
 
     约定：
-    - 第一条 system message 仅用于构建 Engine，因此这里不再重复传入。
+    - 第一条 system message 仅用于构建聊天模型，因此这里不再重复传入。
     - 最后一条 user message 作为当前用户输入。
     - 其他消息尽量拼接到 history 中。
     """
@@ -214,7 +215,7 @@ def run_with_engine(engine: Engine, messages: list[ChatMessage]) -> str:
         role = message.role
         content = message.content
 
-        # 第一条 system message 已经在构建 Engine 时用过了
+        # 第一条 system message 已经在构建聊天模型时用过了
         # 这里就不再重复塞给 history，避免重复
         if role == "system" and i == 0:
             continue
@@ -238,9 +239,9 @@ def run_with_engine(engine: Engine, messages: list[ChatMessage]) -> str:
     # 把历史片段列表拼成一个多行字符串
     history = "\n".join(history_parts)
 
-    # 真正调用 Engine.chat()
+    # 真正调用聊天模型
     # 这里 long_term_memory 先传空字符串，说明这版脚本暂时还没接长期记忆
-    return engine.run(
+    return chat_model.run(
         EngineChatRequest(
             user_input=user_input,
             history=history,
@@ -254,7 +255,7 @@ def run_with_engine(engine: Engine, messages: list[ChatMessage]) -> str:
 # ===================
 
 def run_system_group_case(
-    engine: Engine,
+    chat_model: ChatModel,
     variant: PromptVariant,
     case_input: SupportedCaseInput,
 ) -> str:
@@ -275,10 +276,10 @@ def run_system_group_case(
     ]
     
     # 交给通用执行函数处理
-    return run_with_engine(engine=engine, messages=messages)
+    return run_with_engine(chat_model=chat_model, messages=messages)
 
 def run_summary_group_case(
-    engine: Engine,
+    chat_model: ChatModel,
     variant: PromptVariant,
     case_input: SupportedCaseInput,
 ) -> str:
@@ -299,9 +300,9 @@ def run_summary_group_case(
     messages = [
         ChatMessage(role="user", content=prompt_text),
     ]
-    return run_with_engine(engine=engine, messages=messages)
+    return run_with_engine(chat_model=chat_model, messages=messages)
 
-def get_group_runner(group: PromptGroup) -> Callable[[Engine, PromptVariant, SupportedCaseInput], str]:
+def get_group_runner(group: PromptGroup) -> Callable[[ChatModel, PromptVariant, SupportedCaseInput], str]:
     """
     根据group前缀，决定用哪个adapter
     """
@@ -337,8 +338,8 @@ def run_group_ab_test(
     judge_service = ABTestJudgeService() if judge else None
 
     # 每个 prompt variant 只初始化一次 Engine，避免按 case 重复初始化
-    engines: dict[str, Engine] = {
-        variant.name: build_engine_for_variant(variant, temperature)
+    chat_models: dict[str, ChatModel] = {
+        variant.name: build_chat_model_for_variant(variant, temperature)
         for variant in variants
     }
 
@@ -355,10 +356,10 @@ def run_group_ab_test(
         
         # 内层循环：让每个 prompt 版本都跑一遍当前 case
         for variant in variants:
-            # 取出这个 variant 对应的 Engine（已经提前初始化好了）
-            engine = engines[variant.name]
+            # 取出这个 variant 对应的聊天模型（已经提前初始化好了）
+            chat_model = chat_models[variant.name]
             # 真正执行一次模型调用
-            output = runner(engine, variant, case_input)
+            output = runner(chat_model, variant, case_input)
             # 把该 variant 的输出结果记录下来
             result_item.outputs[variant.name] = PromptRunOutput(
                 prompt_path=variant.relative_path,

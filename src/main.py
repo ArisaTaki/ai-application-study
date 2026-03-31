@@ -1,10 +1,10 @@
-from app.core.engine import Engine
+from app.infra.factories.llm_factory import build_chat_model
 from app.core.schemas import EngineChatRequest
 
 def main():
-    engine = Engine()
+    chat_model = build_chat_model()
  
-    result = engine.run(
+    result = chat_model.run(
         EngineChatRequest(
             user_input="我最近很烦躁，被项目客户一而再再而三地修改，而且不加工期不给商量。",
             history="用户之前提到正在做一个很麻烦的项目，没有设计，客户无理取闹。",
