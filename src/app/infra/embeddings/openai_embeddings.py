@@ -1,12 +1,35 @@
 from langchain_openai import OpenAIEmbeddings
 
-from app.config.settings import load_settings
+from app.config.schemas import EmbeddingModelConfig
+from app.infra.embeddings.base import BaseEmbeddingAdapter
 
 
-def build_openai_embeddings(model: str = "text-embedding-3-small") -> OpenAIEmbeddings:
-    """构造默认 OpenAI embeddings 实例。"""
-    settings = load_settings()
+class OpenAIEmbeddingModel(BaseEmbeddingAdapter):
+    """基于 OpenAIEmbeddings 的具体 embedding 实现。"""
 
-    if settings.api_base_url:
-        return OpenAIEmbeddings(model=model, base_url=settings.api_base_url)
-    return OpenAIEmbeddings(model=model)
+    def __init__(self, config: EmbeddingModelConfig):
+        self.client: OpenAIEmbeddings | None = None
+        super().__init__(config=config)
+
+    def _build_runtime(self) -> None:
+        if self.config.base_url:
+            self.client = OpenAIEmbeddings(
+                model=self.config.model,
+                base_url=self.config.base_url,
+            )
+            return
+
+        self.client = OpenAIEmbeddings(model=self.config.model)
+
+    def _reset_runtime(self) -> None:
+        self.client = None
+
+    def embed_query(self, text: str) -> list[float]:
+        if self.client is None:
+            raise RuntimeError("Embedding 模型未初始化成功")
+        return self.client.embed_query(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if self.client is None:
+            raise RuntimeError("Embedding 模型未初始化成功")
+        return self.client.embed_documents(texts)

@@ -3,6 +3,7 @@ import logging
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.core.contracts.embeddings import EmbeddingModel
 from app.infra.factories.embedding_factory import build_embeddings
 from app.infra.loaders.pdf_loader import load_pdf_documents
 
@@ -14,7 +15,7 @@ class KnowledgeBaseManager:
 
     def __init__(self, persist_directory: str = "./chroma_db/psychology_kb"):
         self.persist_directory = persist_directory
-        self.embedding_model = build_embeddings()
+        self.embedding_model: EmbeddingModel = build_embeddings(use_case="rag")
         self.vector_store = None
 
         # 配置文档分块器

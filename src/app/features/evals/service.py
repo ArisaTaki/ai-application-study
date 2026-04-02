@@ -32,6 +32,7 @@ class ABTestJudgeService:
         self.judge_prompt_path = judge_prompt_path or self.JUDGE_PROMPT_PATH
         judge_prompt_text = load_prompt(PromptReference(self.judge_prompt_path))
         self.chat_model: ChatModel = build_chat_model(
+            use_case="judge",
             system_prompt=judge_prompt_text,
             temperature=temperature if temperature is not None else 0.0,
         )

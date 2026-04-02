@@ -188,6 +188,7 @@ def build_chat_model_for_variant(
     # 这里把“某个 prompt 版本的内容”塞进聊天模型里，作为 system prompt
     # temperature 如果外部没传，就默认用 0.7
     return build_chat_model(
+        use_case="chat",
         system_prompt=variant.content,
         temperature=temperature if temperature is not None else 0.7,
     )
